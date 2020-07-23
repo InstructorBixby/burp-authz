@@ -10,11 +10,16 @@ class BurpExtender(IBurpExtender, IHttpListener):
         self._callbacks = callbacks
         self._helpers = callbacks.getHelpers()
         callbacks.setExtensionName("authz")
-        # registerHttpListener means processHttpMessage gets called
-        # for everything burp sees, proxy, repeater, scanner, all of it
         callbacks.registerHttpListener(self)
         print "authz loaded"
 
     def processHttpMessage(self, toolFlag, messageIsRequest, message):
+        # processHttpMessage fires twice for every request, once on the
+        # way out and once when the response comes back. we want the
+        # response, so skip the request half
+        if messageIsRequest:
+            return
         info = self._helpers.analyzeRequest(message)
-        print "%s %s" % (info.getMethod(), info.getUrl())
+        resp = message.getResponse()
+        print "%s %s %d bytes" % (info.getMethod(), info.getUrl(),
+                                  len(resp))

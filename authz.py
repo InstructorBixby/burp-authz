@@ -3,6 +3,9 @@
 
 from burp import IBurpExtender, IHttpListener
 
+# low privilege user session. todo: not hardcoded
+LOWPRIV_COOKIE = "session=eyJ1aWQiOjQyfQ.XlQ2mw.notarealcookie"
+
 
 class BurpExtender(IBurpExtender, IHttpListener):
 
@@ -13,13 +16,24 @@ class BurpExtender(IBurpExtender, IHttpListener):
         callbacks.registerHttpListener(self)
         print "authz loaded"
 
+    def swap_cookie(self, request):
+        # analyzeRequest gives you the headers as a list of strings,
+        # so drop the Cookie line and put mine in instead
+        info = self._helpers.analyzeRequest(request)
+        headers = list(info.getHeaders())
+        headers = [h for h in headers
+                   if not h.lower().startswith("cookie:")]
+        headers.append("Cookie: " + LOWPRIV_COOKIE)
+        body = request[info.getBodyOffset():]
+        return self._helpers.buildHttpMessage(headers, body)
+
     def processHttpMessage(self, toolFlag, messageIsRequest, message):
-        # processHttpMessage fires twice for every request, once on the
-        # way out and once when the response comes back. we want the
-        # response, so skip the request half
         if messageIsRequest:
             return
         info = self._helpers.analyzeRequest(message)
-        resp = message.getResponse()
-        print "%s %s %d bytes" % (info.getMethod(), info.getUrl(),
-                                  len(resp))
+        replayed = self._callbacks.makeHttpRequest(
+            message.getHttpService(),
+            self.swap_cookie(message.getRequest()))
+        print "%s %s orig=%d lowpriv=%d" % (
+            info.getMethod(), info.getUrl(),
+            len(message.getResponse()), len(replayed.getResponse()))

@@ -21,6 +21,9 @@ class BurpExtender(IBurpExtender, IHttpListener):
         headers = [h for h in headers
                    if not h.lower().startswith("cookie:")]
         headers.append("Cookie: " + LOWPRIV_COOKIE)
+        # request is a java byte[]. slicing it in jython gives you an
+        # array back, and buildHttpMessage wants exactly that, so do
+        # NOT turn the body into a string on the way through
         body = request[info.getBodyOffset():]
         return self._helpers.buildHttpMessage(headers, body)
 
@@ -34,8 +37,6 @@ class BurpExtender(IBurpExtender, IHttpListener):
 
         original_len = len(message.getResponse())
         lowpriv_len = len(replayed.getResponse())
-        # if the low privilege user gets the same number of bytes back
-        # then the server probably did not check anything
         if original_len == lowpriv_len:
             result = "SAME - check this"
         else:

@@ -1,6 +1,8 @@
 # burp extension for authorization testing
 # load it with Extender -> Extensions -> Add -> Extension type: Python
 
+from java.io import PrintWriter
+
 from burp import IBurpExtender, IHttpListener
 
 LOWPRIV_COOKIE = "session=eyJ1aWQiOjQyfQ.XlQ2mw.notarealcookie"
@@ -11,9 +13,17 @@ class BurpExtender(IBurpExtender, IHttpListener):
     def registerExtenderCallbacks(self, callbacks):
         self._callbacks = callbacks
         self._helpers = callbacks.getHelpers()
+        # print goes to the terminal burp was started from, which is
+        # useless when burp was started from the dock. this writes to
+        # the Output tab of the extension instead. True = autoflush
+        self._out = PrintWriter(callbacks.getStdout(), True)
+        self._err = PrintWriter(callbacks.getStderr(), True)
         callbacks.setExtensionName("authz")
         callbacks.registerHttpListener(self)
-        print "authz loaded"
+        self._out.println("authz loaded")
+
+    def log(self, msg):
+        self._out.println(msg)
 
     def swap_cookie(self, request):
         info = self._helpers.analyzeRequest(request)
@@ -21,9 +31,6 @@ class BurpExtender(IBurpExtender, IHttpListener):
         headers = [h for h in headers
                    if not h.lower().startswith("cookie:")]
         headers.append("Cookie: " + LOWPRIV_COOKIE)
-        # request is a java byte[]. slicing it in jython gives you an
-        # array back, and buildHttpMessage wants exactly that, so do
-        # NOT turn the body into a string on the way through
         body = request[info.getBodyOffset():]
         return self._helpers.buildHttpMessage(headers, body)
 
@@ -37,10 +44,7 @@ class BurpExtender(IBurpExtender, IHttpListener):
 
         original_len = len(message.getResponse())
         lowpriv_len = len(replayed.getResponse())
-        if original_len == lowpriv_len:
-            result = "SAME - check this"
-        else:
-            result = "different"
-        print "%-6s %-60s %s (%d vs %d)" % (
+        result = "SAME" if original_len == lowpriv_len else "different"
+        self.log("%-6s %-60s %-9s %d vs %d" % (
             info.getMethod(), info.getUrl(), result,
-            original_len, lowpriv_len)
+            original_len, lowpriv_len))

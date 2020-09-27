@@ -13,9 +13,6 @@ class BurpExtender(IBurpExtender, IHttpListener):
     def registerExtenderCallbacks(self, callbacks):
         self._callbacks = callbacks
         self._helpers = callbacks.getHelpers()
-        # print goes to the terminal burp was started from, which is
-        # useless when burp was started from the dock. this writes to
-        # the Output tab of the extension instead. True = autoflush
         self._out = PrintWriter(callbacks.getStdout(), True)
         self._err = PrintWriter(callbacks.getStderr(), True)
         callbacks.setExtensionName("authz")
@@ -38,6 +35,11 @@ class BurpExtender(IBurpExtender, IHttpListener):
         if messageIsRequest:
             return
         info = self._helpers.analyzeRequest(message)
+        # i replayed half of google because youtube was open in
+        # another tab. target scope only from now on
+        if not self._callbacks.isInScope(info.getUrl()):
+            return
+
         replayed = self._callbacks.makeHttpRequest(
             message.getHttpService(),
             self.swap_cookie(message.getRequest()))

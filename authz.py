@@ -7,6 +7,9 @@ from burp import IBurpExtender, IHttpListener
 
 LOWPRIV_COOKIE = "session=eyJ1aWQiOjQyfQ.XlQ2mw.notarealcookie"
 
+BORING = (".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg",
+          ".ico", ".woff", ".woff2", ".ttf", ".map")
+
 
 class BurpExtender(IBurpExtender, IHttpListener):
 
@@ -22,6 +25,13 @@ class BurpExtender(IBurpExtender, IHttpListener):
     def log(self, msg):
         self._out.println(msg)
 
+    def boring(self, url):
+        path = url.getPath().lower()
+        for ext in BORING:
+            if path.endswith(ext):
+                return True
+        return False
+
     def swap_cookie(self, request):
         info = self._helpers.analyzeRequest(request)
         headers = list(info.getHeaders())
@@ -35,9 +45,8 @@ class BurpExtender(IBurpExtender, IHttpListener):
         if messageIsRequest:
             return
         info = self._helpers.analyzeRequest(message)
-        # i replayed half of google because youtube was open in
-        # another tab. target scope only from now on
-        if not self._callbacks.isInScope(info.getUrl()):
+        url = info.getUrl()
+        if not self._callbacks.isInScope(url) or self.boring(url):
             return
 
         replayed = self._callbacks.makeHttpRequest(
@@ -48,5 +57,4 @@ class BurpExtender(IBurpExtender, IHttpListener):
         lowpriv_len = len(replayed.getResponse())
         result = "SAME" if original_len == lowpriv_len else "different"
         self.log("%-6s %-60s %-9s %d vs %d" % (
-            info.getMethod(), info.getUrl(), result,
-            original_len, lowpriv_len))
+            info.getMethod(), url, result, original_len, lowpriv_len))

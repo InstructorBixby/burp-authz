@@ -18,6 +18,9 @@ class BurpExtender(IBurpExtender, IHttpListener):
         self._helpers = callbacks.getHelpers()
         self._out = PrintWriter(callbacks.getStdout(), True)
         self._err = PrintWriter(callbacks.getStderr(), True)
+        # method + url of everything already replayed. a single page
+        # load can fire the same xhr fifteen times
+        self._seen = set()
         callbacks.setExtensionName("authz")
         callbacks.registerHttpListener(self)
         self._out.println("authz loaded")
@@ -31,6 +34,11 @@ class BurpExtender(IBurpExtender, IHttpListener):
             if path.endswith(ext):
                 return True
         return False
+
+    def key(self, method, url):
+        # query string included, /api/order?id=1 and ?id=2 are
+        # different questions
+        return "%s %s" % (method, str(url))
 
     def swap_cookie(self, request):
         info = self._helpers.analyzeRequest(request)
@@ -48,6 +56,10 @@ class BurpExtender(IBurpExtender, IHttpListener):
         url = info.getUrl()
         if not self._callbacks.isInScope(url) or self.boring(url):
             return
+        k = self.key(info.getMethod(), url)
+        if k in self._seen:
+            return
+        self._seen.add(k)
 
         replayed = self._callbacks.makeHttpRequest(
             message.getHttpService(),

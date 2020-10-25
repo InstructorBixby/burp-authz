@@ -3,7 +3,10 @@
 
 from java.io import PrintWriter
 
-from burp import IBurpExtender, IHttpListener
+from javax.swing import JPanel, JScrollPane, JTextArea
+from java.awt import BorderLayout
+
+from burp import IBurpExtender, IHttpListener, ITab
 
 LOWPRIV_COOKIE = "session=eyJ1aWQiOjQyfQ.XlQ2mw.notarealcookie"
 
@@ -11,22 +14,34 @@ BORING = (".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg",
           ".ico", ".woff", ".woff2", ".ttf", ".map")
 
 
-class BurpExtender(IBurpExtender, IHttpListener):
+class BurpExtender(IBurpExtender, IHttpListener, ITab):
 
     def registerExtenderCallbacks(self, callbacks):
         self._callbacks = callbacks
         self._helpers = callbacks.getHelpers()
         self._out = PrintWriter(callbacks.getStdout(), True)
-        self._err = PrintWriter(callbacks.getStderr(), True)
-        # method + url of everything already replayed. a single page
-        # load can fire the same xhr fifteen times
         self._seen = set()
+
+        self._area = JTextArea()
+        self._area.setEditable(False)
+        self._panel = JPanel(BorderLayout())
+        self._panel.add(JScrollPane(self._area), BorderLayout.CENTER)
+
         callbacks.setExtensionName("authz")
         callbacks.registerHttpListener(self)
+        callbacks.addSuiteTab(self)
         self._out.println("authz loaded")
+
+    # ITab
+    def getTabCaption(self):
+        return "authz"
+
+    def getUiComponent(self):
+        return self._panel
 
     def log(self, msg):
         self._out.println(msg)
+        self._area.append(msg + "\n")
 
     def boring(self, url):
         path = url.getPath().lower()
@@ -36,8 +51,6 @@ class BurpExtender(IBurpExtender, IHttpListener):
         return False
 
     def key(self, method, url):
-        # query string included, /api/order?id=1 and ?id=2 are
-        # different questions
         return "%s %s" % (method, str(url))
 
     def swap_cookie(self, request):

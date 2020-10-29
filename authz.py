@@ -3,7 +3,8 @@
 
 from java.io import PrintWriter
 
-from javax.swing import JPanel, JScrollPane, JTextArea
+from javax.swing import JPanel, JScrollPane, JTable
+from javax.swing.table import AbstractTableModel
 from java.awt import BorderLayout
 
 from burp import IBurpExtender, IHttpListener, ITab
@@ -12,6 +13,31 @@ LOWPRIV_COOKIE = "session=eyJ1aWQiOjQyfQ.XlQ2mw.notarealcookie"
 
 BORING = (".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg",
           ".ico", ".woff", ".woff2", ".ttf", ".map")
+
+COLUMNS = ["#", "method", "url", "result", "orig", "lowpriv"]
+
+
+class ResultsModel(AbstractTableModel):
+    """Swing asks this object what to draw, so the rows live here."""
+
+    def __init__(self):
+        self.rows = []
+
+    # AbstractTableModel
+    def getRowCount(self):
+        return len(self.rows)
+
+    def getColumnCount(self):
+        return len(COLUMNS)
+
+    def getColumnName(self, i):
+        return COLUMNS[i]
+
+    def getValueAt(self, row, col):
+        return self.rows[row][col]
+
+    def add(self, row):
+        self.rows.append(row)
 
 
 class BurpExtender(IBurpExtender, IHttpListener, ITab):
@@ -22,26 +48,22 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab):
         self._out = PrintWriter(callbacks.getStdout(), True)
         self._seen = set()
 
-        self._area = JTextArea()
-        self._area.setEditable(False)
+        self._model = ResultsModel()
+        self._table = JTable(self._model)
+        self._table.setAutoCreateRowSorter(True)
         self._panel = JPanel(BorderLayout())
-        self._panel.add(JScrollPane(self._area), BorderLayout.CENTER)
+        self._panel.add(JScrollPane(self._table), BorderLayout.CENTER)
 
         callbacks.setExtensionName("authz")
         callbacks.registerHttpListener(self)
         callbacks.addSuiteTab(self)
         self._out.println("authz loaded")
 
-    # ITab
     def getTabCaption(self):
         return "authz"
 
     def getUiComponent(self):
         return self._panel
-
-    def log(self, msg):
-        self._out.println(msg)
-        self._area.append(msg + "\n")
 
     def boring(self, url):
         path = url.getPath().lower()
@@ -81,5 +103,5 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab):
         original_len = len(message.getResponse())
         lowpriv_len = len(replayed.getResponse())
         result = "SAME" if original_len == lowpriv_len else "different"
-        self.log("%-6s %-60s %-9s %d vs %d" % (
-            info.getMethod(), url, result, original_len, lowpriv_len))
+        self._model.add([len(self._model.rows) + 1, info.getMethod(),
+                         str(url), result, original_len, lowpriv_len])

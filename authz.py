@@ -18,12 +18,10 @@ COLUMNS = ["#", "method", "url", "result", "orig", "lowpriv"]
 
 
 class ResultsModel(AbstractTableModel):
-    """Swing asks this object what to draw, so the rows live here."""
 
     def __init__(self):
         self.rows = []
 
-    # AbstractTableModel
     def getRowCount(self):
         return len(self.rows)
 
@@ -38,6 +36,10 @@ class ResultsModel(AbstractTableModel):
 
     def add(self, row):
         self.rows.append(row)
+        # the model has to tell swing it changed, otherwise the table
+        # only redraws when something else forces a repaint
+        i = len(self.rows) - 1
+        self.fireTableRowsInserted(i, i)
 
 
 class BurpExtender(IBurpExtender, IHttpListener, ITab):

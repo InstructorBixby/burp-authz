@@ -36,8 +36,6 @@ class ResultsModel(AbstractTableModel):
 
     def add(self, row):
         self.rows.append(row)
-        # the model has to tell swing it changed, otherwise the table
-        # only redraws when something else forces a repaint
         i = len(self.rows) - 1
         self.fireTableRowsInserted(i, i)
 
@@ -52,7 +50,9 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab):
 
         self._model = ResultsModel()
         self._table = JTable(self._model)
-        self._table.setAutoCreateRowSorter(True)
+        # setAutoCreateRowSorter plus rows arriving from a non-swing
+        # thread = IndexOutOfBoundsException inside the sorter. no
+        # sorting until the threading is fixed properly
         self._panel = JPanel(BorderLayout())
         self._panel.add(JScrollPane(self._table), BorderLayout.CENTER)
 

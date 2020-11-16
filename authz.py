@@ -2,8 +2,9 @@
 # load it with Extender -> Extensions -> Add -> Extension type: Python
 
 from java.io import PrintWriter
+from java.lang import Runnable
 
-from javax.swing import JPanel, JScrollPane, JTable
+from javax.swing import (JPanel, JScrollPane, JTable, SwingUtilities)
 from javax.swing.table import AbstractTableModel
 from java.awt import BorderLayout
 
@@ -40,6 +41,19 @@ class ResultsModel(AbstractTableModel):
         self.fireTableRowsInserted(i, i)
 
 
+class AddRow(Runnable):
+    """Swing is single threaded. Every model change has to happen on
+    the event dispatch thread or the table and its sorter disagree
+    about how many rows exist."""
+
+    def __init__(self, model, row):
+        self.model = model
+        self.row = row
+
+    def run(self):
+        self.model.add(self.row)
+
+
 class BurpExtender(IBurpExtender, IHttpListener, ITab):
 
     def registerExtenderCallbacks(self, callbacks):
@@ -50,9 +64,7 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab):
 
         self._model = ResultsModel()
         self._table = JTable(self._model)
-        # setAutoCreateRowSorter plus rows arriving from a non-swing
-        # thread = IndexOutOfBoundsException inside the sorter. no
-        # sorting until the threading is fixed properly
+        self._table.setAutoCreateRowSorter(True)
         self._panel = JPanel(BorderLayout())
         self._panel.add(JScrollPane(self._table), BorderLayout.CENTER)
 
@@ -66,6 +78,9 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab):
 
     def getUiComponent(self):
         return self._panel
+
+    def add_row(self, row):
+        SwingUtilities.invokeLater(AddRow(self._model, row))
 
     def boring(self, url):
         path = url.getPath().lower()
@@ -105,5 +120,5 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab):
         original_len = len(message.getResponse())
         lowpriv_len = len(replayed.getResponse())
         result = "SAME" if original_len == lowpriv_len else "different"
-        self._model.add([len(self._model.rows) + 1, info.getMethod(),
-                         str(url), result, original_len, lowpriv_len])
+        self.add_row([len(self._model.rows) + 1, info.getMethod(),
+                      str(url), result, original_len, lowpriv_len])

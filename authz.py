@@ -3,12 +3,15 @@
 
 from java.io import PrintWriter
 from java.lang import Runnable
+from java.util import ArrayList
 
-from javax.swing import (JPanel, JScrollPane, JTable, SwingUtilities)
+from javax.swing import (JMenuItem, JPanel, JScrollPane, JTable,
+                         SwingUtilities)
 from javax.swing.table import AbstractTableModel
 from java.awt import BorderLayout
 
-from burp import IBurpExtender, IHttpListener, ITab
+from burp import (IBurpExtender, IContextMenuFactory, IHttpListener,
+                  ITab)
 
 LOWPRIV_COOKIE = "session=eyJ1aWQiOjQyfQ.XlQ2mw.notarealcookie"
 
@@ -42,9 +45,6 @@ class ResultsModel(AbstractTableModel):
 
 
 class AddRow(Runnable):
-    """Swing is single threaded. Every model change has to happen on
-    the event dispatch thread or the table and its sorter disagree
-    about how many rows exist."""
 
     def __init__(self, model, row):
         self.model = model
@@ -54,13 +54,17 @@ class AddRow(Runnable):
         self.model.add(self.row)
 
 
-class BurpExtender(IBurpExtender, IHttpListener, ITab):
+class BurpExtender(IBurpExtender, IHttpListener, ITab,
+                   IContextMenuFactory):
 
     def registerExtenderCallbacks(self, callbacks):
         self._callbacks = callbacks
         self._helpers = callbacks.getHelpers()
         self._out = PrintWriter(callbacks.getStdout(), True)
         self._seen = set()
+        # passive mode replays everything in scope as you browse,
+        # which is rude on an app that writes things. off by default
+        self._passive = False
 
         self._model = ResultsModel()
         self._table = JTable(self._model)
@@ -70,6 +74,7 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab):
 
         callbacks.setExtensionName("authz")
         callbacks.registerHttpListener(self)
+        callbacks.registerContextMenuFactory(self)
         callbacks.addSuiteTab(self)
         self._out.println("authz loaded")
 
@@ -78,6 +83,18 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab):
 
     def getUiComponent(self):
         return self._panel
+
+    # IContextMenuFactory
+    def createMenuItems(self, invocation):
+        menu = ArrayList()
+        item = JMenuItem("Send to authz",
+                         actionPerformed=lambda e: self.from_menu(invocation))
+        menu.add(item)
+        return menu
+
+    def from_menu(self, invocation):
+        for message in invocation.getSelectedMessages():
+            self.check(message)
 
     def add_row(self, row):
         SwingUtilities.invokeLater(AddRow(self._model, row))
@@ -101,13 +118,9 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab):
         body = request[info.getBodyOffset():]
         return self._helpers.buildHttpMessage(headers, body)
 
-    def processHttpMessage(self, toolFlag, messageIsRequest, message):
-        if messageIsRequest:
-            return
+    def check(self, message):
         info = self._helpers.analyzeRequest(message)
         url = info.getUrl()
-        if not self._callbacks.isInScope(url) or self.boring(url):
-            return
         k = self.key(info.getMethod(), url)
         if k in self._seen:
             return
@@ -122,3 +135,12 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab):
         result = "SAME" if original_len == lowpriv_len else "different"
         self.add_row([len(self._model.rows) + 1, info.getMethod(),
                       str(url), result, original_len, lowpriv_len])
+
+    def processHttpMessage(self, toolFlag, messageIsRequest, message):
+        if messageIsRequest or not self._passive:
+            return
+        info = self._helpers.analyzeRequest(message)
+        url = info.getUrl()
+        if not self._callbacks.isInScope(url) or self.boring(url):
+            return
+        self.check(message)

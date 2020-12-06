@@ -5,20 +5,22 @@ from java.io import PrintWriter
 from java.lang import Runnable
 from java.util import ArrayList
 
-from javax.swing import (JMenuItem, JPanel, JScrollPane, JTable,
-                         SwingUtilities)
+from javax.swing import (BorderFactory, BoxLayout, JButton, JCheckBox,
+                         JLabel, JMenuItem, JPanel, JScrollPane,
+                         JSplitPane, JTable, JTextArea, SwingUtilities)
 from javax.swing.table import AbstractTableModel
-from java.awt import BorderLayout
+from java.awt import BorderLayout, Dimension
 
 from burp import (IBurpExtender, IContextMenuFactory, IHttpListener,
                   ITab)
-
-LOWPRIV_COOKIE = "session=eyJ1aWQiOjQyfQ.XlQ2mw.notarealcookie"
 
 BORING = (".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg",
           ".ico", ".woff", ".woff2", ".ttf", ".map")
 
 COLUMNS = ["#", "method", "url", "result", "orig", "lowpriv"]
+
+HINT = ("Cookie or Authorization header for the low privilege user,\n"
+        "one header per line, exactly as it appears in a request.")
 
 
 class ResultsModel(AbstractTableModel):
@@ -62,15 +64,31 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
         self._helpers = callbacks.getHelpers()
         self._out = PrintWriter(callbacks.getStdout(), True)
         self._seen = set()
-        # passive mode replays everything in scope as you browse,
-        # which is rude on an app that writes things. off by default
-        self._passive = False
 
         self._model = ResultsModel()
         self._table = JTable(self._model)
         self._table.setAutoCreateRowSorter(True)
+
+        self._headers_box = JTextArea(4, 80)
+        self._headers_box.setToolTipText(HINT)
+        self._passive_box = JCheckBox("replay everything in scope "
+                                      "as i browse")
+        clear = JButton("clear results",
+                        actionPerformed=lambda e: self.clear())
+
+        top = JPanel()
+        top.setLayout(BoxLayout(top, BoxLayout.Y_AXIS))
+        top.setBorder(BorderFactory.createTitledBorder("low privilege "
+                                                       "session"))
+        top.add(JScrollPane(self._headers_box))
+        top.add(self._passive_box)
+        top.add(clear)
+
+        split = JSplitPane(JSplitPane.VERTICAL_SPLIT, top,
+                           JScrollPane(self._table))
+        split.setPreferredSize(Dimension(900, 600))
         self._panel = JPanel(BorderLayout())
-        self._panel.add(JScrollPane(self._table), BorderLayout.CENTER)
+        self._panel.add(split, BorderLayout.CENTER)
 
         callbacks.setExtensionName("authz")
         callbacks.registerHttpListener(self)
@@ -84,17 +102,25 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
     def getUiComponent(self):
         return self._panel
 
-    # IContextMenuFactory
     def createMenuItems(self, invocation):
         menu = ArrayList()
-        item = JMenuItem("Send to authz",
-                         actionPerformed=lambda e: self.from_menu(invocation))
-        menu.add(item)
+        menu.add(JMenuItem(
+            "Send to authz",
+            actionPerformed=lambda e: self.from_menu(invocation)))
         return menu
 
     def from_menu(self, invocation):
         for message in invocation.getSelectedMessages():
             self.check(message)
+
+    def clear(self):
+        self._seen = set()
+        self._model.rows = []
+        self._model.fireTableDataChanged()
+
+    def lowpriv_headers(self):
+        lines = self._headers_box.getText().splitlines()
+        return [l.strip() for l in lines if l.strip()]
 
     def add_row(self, row):
         SwingUtilities.invokeLater(AddRow(self._model, row))
@@ -109,12 +135,13 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
     def key(self, method, url):
         return "%s %s" % (method, str(url))
 
-    def swap_cookie(self, request):
+    def rewrite(self, request):
+        replacements = self.lowpriv_headers()
+        names = [h.split(":")[0].lower() for h in replacements]
         info = self._helpers.analyzeRequest(request)
-        headers = list(info.getHeaders())
-        headers = [h for h in headers
-                   if not h.lower().startswith("cookie:")]
-        headers.append("Cookie: " + LOWPRIV_COOKIE)
+        headers = [h for h in info.getHeaders()
+                   if h.split(":")[0].lower() not in names]
+        headers.extend(replacements)
         body = request[info.getBodyOffset():]
         return self._helpers.buildHttpMessage(headers, body)
 
@@ -128,7 +155,7 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
 
         replayed = self._callbacks.makeHttpRequest(
             message.getHttpService(),
-            self.swap_cookie(message.getRequest()))
+            self.rewrite(message.getRequest()))
 
         original_len = len(message.getResponse())
         lowpriv_len = len(replayed.getResponse())
@@ -137,7 +164,7 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
                       str(url), result, original_len, lowpriv_len])
 
     def processHttpMessage(self, toolFlag, messageIsRequest, message):
-        if messageIsRequest or not self._passive:
+        if messageIsRequest or not self._passive_box.isSelected():
             return
         info = self._helpers.analyzeRequest(message)
         url = info.getUrl()

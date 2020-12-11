@@ -6,8 +6,8 @@ from java.lang import Runnable
 from java.util import ArrayList
 
 from javax.swing import (BorderFactory, BoxLayout, JButton, JCheckBox,
-                         JLabel, JMenuItem, JPanel, JScrollPane,
-                         JSplitPane, JTable, JTextArea, SwingUtilities)
+                         JMenuItem, JPanel, JScrollPane, JSplitPane,
+                         JTable, JTextArea, SwingUtilities)
 from javax.swing.table import AbstractTableModel
 from java.awt import BorderLayout, Dimension
 
@@ -19,8 +19,8 @@ BORING = (".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg",
 
 COLUMNS = ["#", "method", "url", "result", "orig", "lowpriv"]
 
-HINT = ("Cookie or Authorization header for the low privilege user,\n"
-        "one header per line, exactly as it appears in a request.")
+SETTING_HEADERS = "authz.lowpriv.headers"
+SETTING_PASSIVE = "authz.passive"
 
 
 class ResultsModel(AbstractTableModel):
@@ -70,9 +70,9 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
         self._table.setAutoCreateRowSorter(True)
 
         self._headers_box = JTextArea(4, 80)
-        self._headers_box.setToolTipText(HINT)
         self._passive_box = JCheckBox("replay everything in scope "
                                       "as i browse")
+        save = JButton("save", actionPerformed=lambda e: self.save())
         clear = JButton("clear results",
                         actionPerformed=lambda e: self.clear())
 
@@ -82,6 +82,7 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
                                                        "session"))
         top.add(JScrollPane(self._headers_box))
         top.add(self._passive_box)
+        top.add(save)
         top.add(clear)
 
         split = JSplitPane(JSplitPane.VERTICAL_SPLIT, top,
@@ -90,11 +91,30 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
         self._panel = JPanel(BorderLayout())
         self._panel.add(split, BorderLayout.CENTER)
 
+        self.load()
         callbacks.setExtensionName("authz")
         callbacks.registerHttpListener(self)
         callbacks.registerContextMenuFactory(self)
         callbacks.addSuiteTab(self)
         self._out.println("authz loaded")
+
+    # settings are per project, stored by burp itself, and
+    # loadExtensionSetting returns null the first time
+    def load(self):
+        saved = self._callbacks.loadExtensionSetting(SETTING_HEADERS)
+        if saved:
+            self._headers_box.setText(saved.replace("\\n", "\n"))
+        passive = self._callbacks.loadExtensionSetting(SETTING_PASSIVE)
+        self._passive_box.setSelected(passive == "true")
+
+    def save(self):
+        text = self._headers_box.getText()
+        self._callbacks.saveExtensionSetting(
+            SETTING_HEADERS, text.replace("\n", "\\n"))
+        self._callbacks.saveExtensionSetting(
+            SETTING_PASSIVE,
+            "true" if self._passive_box.isSelected() else "false")
+        self._out.println("settings saved")
 
     def getTabCaption(self):
         return "authz"

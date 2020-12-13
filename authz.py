@@ -1,59 +1,35 @@
-# burp extension for authorization testing
-# load it with Extender -> Extensions -> Add -> Extension type: Python
+# burp-authz. authorization testing extension
+# Extender -> Extensions -> Add -> Extension type: Python -> authz.py
+
+import os
+import sys
+
+# burp loads this file by path, so its directory is not on sys.path
+# and "from authzlib import ..." fails with ImportError. jython does
+# set __file__ for an extension, so the directory can be worked out
+EXT_DIR = os.path.dirname(os.path.abspath(__file__))
+if EXT_DIR not in sys.path:
+    sys.path.insert(0, EXT_DIR)
 
 from java.io import PrintWriter
-from java.lang import Runnable
 from java.util import ArrayList
 
 from javax.swing import (BorderFactory, BoxLayout, JButton, JCheckBox,
                          JMenuItem, JPanel, JScrollPane, JSplitPane,
-                         JTable, JTextArea, SwingUtilities)
-from javax.swing.table import AbstractTableModel
+                         JTable, JTextArea)
 from java.awt import BorderLayout, Dimension
 
 from burp import (IBurpExtender, IContextMenuFactory, IHttpListener,
                   ITab)
 
+from authzlib import VERSION, compare, headers as hdr
+from authzlib.table import ResultsModel, add_row
+
 BORING = (".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg",
           ".ico", ".woff", ".woff2", ".ttf", ".map")
 
-COLUMNS = ["#", "method", "url", "result", "orig", "lowpriv"]
-
 SETTING_HEADERS = "authz.lowpriv.headers"
 SETTING_PASSIVE = "authz.passive"
-
-
-class ResultsModel(AbstractTableModel):
-
-    def __init__(self):
-        self.rows = []
-
-    def getRowCount(self):
-        return len(self.rows)
-
-    def getColumnCount(self):
-        return len(COLUMNS)
-
-    def getColumnName(self, i):
-        return COLUMNS[i]
-
-    def getValueAt(self, row, col):
-        return self.rows[row][col]
-
-    def add(self, row):
-        self.rows.append(row)
-        i = len(self.rows) - 1
-        self.fireTableRowsInserted(i, i)
-
-
-class AddRow(Runnable):
-
-    def __init__(self, model, row):
-        self.model = model
-        self.row = row
-
-    def run(self):
-        self.model.add(self.row)
 
 
 class BurpExtender(IBurpExtender, IHttpListener, ITab,
@@ -68,38 +44,36 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
         self._model = ResultsModel()
         self._table = JTable(self._model)
         self._table.setAutoCreateRowSorter(True)
-
         self._headers_box = JTextArea(4, 80)
         self._passive_box = JCheckBox("replay everything in scope "
                                       "as i browse")
-        save = JButton("save", actionPerformed=lambda e: self.save())
-        clear = JButton("clear results",
-                        actionPerformed=lambda e: self.clear())
+        self._panel = self.build_ui()
 
+        self.load()
+        callbacks.setExtensionName("authz " + VERSION)
+        callbacks.registerHttpListener(self)
+        callbacks.registerContextMenuFactory(self)
+        callbacks.addSuiteTab(self)
+        self._out.println("authz " + VERSION + " loaded")
+
+    def build_ui(self):
         top = JPanel()
         top.setLayout(BoxLayout(top, BoxLayout.Y_AXIS))
-        top.setBorder(BorderFactory.createTitledBorder("low privilege "
-                                                       "session"))
+        top.setBorder(
+            BorderFactory.createTitledBorder("low privilege session"))
         top.add(JScrollPane(self._headers_box))
         top.add(self._passive_box)
-        top.add(save)
-        top.add(clear)
+        top.add(JButton("save", actionPerformed=lambda e: self.save()))
+        top.add(JButton("clear results",
+                        actionPerformed=lambda e: self.clear()))
 
         split = JSplitPane(JSplitPane.VERTICAL_SPLIT, top,
                            JScrollPane(self._table))
         split.setPreferredSize(Dimension(900, 600))
-        self._panel = JPanel(BorderLayout())
-        self._panel.add(split, BorderLayout.CENTER)
+        panel = JPanel(BorderLayout())
+        panel.add(split, BorderLayout.CENTER)
+        return panel
 
-        self.load()
-        callbacks.setExtensionName("authz")
-        callbacks.registerHttpListener(self)
-        callbacks.registerContextMenuFactory(self)
-        callbacks.addSuiteTab(self)
-        self._out.println("authz loaded")
-
-    # settings are per project, stored by burp itself, and
-    # loadExtensionSetting returns null the first time
     def load(self):
         saved = self._callbacks.loadExtensionSetting(SETTING_HEADERS)
         if saved:
@@ -108,9 +82,9 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
         self._passive_box.setSelected(passive == "true")
 
     def save(self):
-        text = self._headers_box.getText()
         self._callbacks.saveExtensionSetting(
-            SETTING_HEADERS, text.replace("\n", "\\n"))
+            SETTING_HEADERS,
+            self._headers_box.getText().replace("\n", "\\n"))
         self._callbacks.saveExtensionSetting(
             SETTING_PASSIVE,
             "true" if self._passive_box.isSelected() else "false")
@@ -135,15 +109,11 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
 
     def clear(self):
         self._seen = set()
-        self._model.rows = []
-        self._model.fireTableDataChanged()
+        self._model.clear()
 
     def lowpriv_headers(self):
         lines = self._headers_box.getText().splitlines()
         return [l.strip() for l in lines if l.strip()]
-
-    def add_row(self, row):
-        SwingUtilities.invokeLater(AddRow(self._model, row))
 
     def boring(self, url):
         path = url.getPath().lower()
@@ -152,23 +122,17 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
                 return True
         return False
 
-    def key(self, method, url):
-        return "%s %s" % (method, str(url))
-
     def rewrite(self, request):
-        replacements = self.lowpriv_headers()
-        names = [h.split(":")[0].lower() for h in replacements]
         info = self._helpers.analyzeRequest(request)
-        headers = [h for h in info.getHeaders()
-                   if h.split(":")[0].lower() not in names]
-        headers.extend(replacements)
+        new_headers = hdr.replace(list(info.getHeaders()),
+                                  self.lowpriv_headers())
         body = request[info.getBodyOffset():]
-        return self._helpers.buildHttpMessage(headers, body)
+        return self._helpers.buildHttpMessage(new_headers, body)
 
     def check(self, message):
         info = self._helpers.analyzeRequest(message)
         url = info.getUrl()
-        k = self.key(info.getMethod(), url)
+        k = "%s %s" % (info.getMethod(), str(url))
         if k in self._seen:
             return
         self._seen.add(k)
@@ -179,9 +143,10 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
 
         original_len = len(message.getResponse())
         lowpriv_len = len(replayed.getResponse())
-        result = "SAME" if original_len == lowpriv_len else "different"
-        self.add_row([len(self._model.rows) + 1, info.getMethod(),
-                      str(url), result, original_len, lowpriv_len])
+        result = compare.classify(original_len, lowpriv_len)
+        add_row(self._model,
+                [len(self._model.rows) + 1, info.getMethod(), str(url),
+                 result, original_len, lowpriv_len])
 
     def processHttpMessage(self, toolFlag, messageIsRequest, message):
         if messageIsRequest or not self._passive_box.isSelected():

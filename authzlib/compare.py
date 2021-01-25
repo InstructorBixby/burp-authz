@@ -19,12 +19,16 @@ NOISE = [
     re.compile(r'"csrf_?token"\s*:\s*"[^"]+"', re.I),
     re.compile(r'<input[^>]+name=["\']authenticity_token["\'][^>]*>',
                re.I),
+    # 2020-11-18T18:22:01Z and friends
+    re.compile(r'\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?Z?'),
+    # x-request-id style uuids echoed into the page
+    re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-'
+               r'[0-9a-f]{4}-[0-9a-f]{12}', re.I),
+    re.compile(r'\bnonce=["\'][^"\']+["\']', re.I),
 ]
 
 
 def scrub(body):
-    """Blank out per response noise so two renders of the same page
-    compare equal."""
     if not body:
         return body
     for pattern in NOISE:
@@ -41,13 +45,6 @@ def similarity(a, b):
 
 
 def classify(original_body, replay_body, limit=8192):
-    """Compare two response bodies.
-
-    same      identical once the per response noise is removed
-    similar   close enough that it is probably the same page
-    different something changed, needs a human
-    error     no response at all
-    """
     if replay_body is None:
         return ERROR
     a = scrub(original_body)

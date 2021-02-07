@@ -8,41 +8,62 @@ PAGE = (
 )
 
 
+def resp(status, body="", location=None):
+    headers = ["HTTP/1.1 %d" % status, "Content-Type: text/html"]
+    if location:
+        headers.append("Location: " + location)
+    return (status, headers, body)
+
+
 def test_identical_bodies_are_same():
-    assert compare.classify("<p>hello</p>",
-                            "<p>hello</p>") == compare.SAME
+    assert compare.classify(resp(200, "<p>hi</p>"),
+                            resp(200, "<p>hi</p>")) == compare.SAME
 
 
 def test_unrelated_bodies_are_different():
-    assert compare.classify("<p>hello</p>",
-                            "403 Forbidden") == compare.DIFFERENT
+    assert compare.classify(resp(200, "<p>hi</p>"),
+                            resp(200, "nope")) == compare.DIFFERENT
+
+
+def test_a_403_is_different_from_a_200():
+    assert compare.classify(resp(200, "<p>hi</p>"),
+                            resp(403, "Forbidden")) == compare.DIFFERENT
 
 
 def test_no_response_is_error():
-    assert compare.classify("<p>hello</p>", None) == compare.ERROR
+    assert compare.classify(resp(200, "<p>hi</p>"),
+                            None) == compare.ERROR
 
 
 def test_csrf_token_is_not_a_difference():
-    a = PAGE % ("aaaaaaaaaaaa", "2020-11-19T10:00:00Z")
-    b = PAGE % ("bbbbbbbbbbbb", "2020-11-19T10:00:04Z")
+    a = resp(200, PAGE % ("aaaaaaaaaaaa", "2020-11-19T10:00:00Z"))
+    b = resp(200, PAGE % ("bbbbbbbbbbbb", "2020-11-19T10:00:04Z"))
     assert compare.classify(a, b) == compare.SAME
 
 
-def test_scrub_removes_a_timestamp():
-    assert "2020-11-19" not in compare.scrub("built 2020-11-19T10:00:00Z")
+def test_redirect_to_the_same_place_is_same():
+    a = resp(302, "", "/dashboard")
+    b = resp(302, "", "/dashboard")
+    assert compare.classify(a, b) == compare.SAME
 
 
-def test_scrub_removes_a_uuid():
-    out = compare.scrub("request 5a9f8d2e-1c4b-4e7a-9f31-0b2c6d8e4a11")
-    assert "5a9f8d2e" not in out
+def test_redirect_to_login_is_not_the_same_as_redirect_to_dashboard():
+    a = resp(302, "", "/dashboard")
+    b = resp(302, "", "/login?next=/dashboard")
+    assert compare.classify(a, b) == compare.DIFFERENT
 
 
-def test_scrub_leaves_a_plain_page_alone():
-    assert compare.scrub("<p>hello</p>") == "<p>hello</p>"
+def test_header_lookup_is_case_insensitive():
+    assert compare.header(["location: /x"], "Location") == "/x"
+
+
+def test_header_lookup_returns_none_when_absent():
+    assert compare.header(["Content-Type: text/html"],
+                          "Location") is None
 
 
 def test_a_longer_page_with_one_changed_row_is_similar():
     rows = ["<tr><td>order %d</td></tr>" % i for i in range(200)]
-    a = "".join(rows)
-    b = "".join(rows[:-1] + ["<tr><td>order gone</td></tr>"])
+    a = resp(200, "".join(rows))
+    b = resp(200, "".join(rows[:-1] + ["<tr><td>gone</td></tr>"]))
     assert compare.classify(a, b) == compare.SIMILAR

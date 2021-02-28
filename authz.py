@@ -4,9 +4,6 @@
 import os
 import sys
 
-# burp loads this file by path, so its directory is not on sys.path
-# and "from authzlib import ..." fails with ImportError. jython does
-# set __file__ for an extension, so the directory can be worked out
 EXT_DIR = os.path.dirname(os.path.abspath(__file__))
 if EXT_DIR not in sys.path:
     sys.path.insert(0, EXT_DIR)
@@ -129,6 +126,16 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
         body = request[info.getBodyOffset():]
         return self._helpers.buildHttpMessage(new_headers, body)
 
+    # (status, headers, body) the way compare.classify wants it. the
+    # body has to go through bytesToString, it is a java byte[]
+    def parts(self, response):
+        if response is None:
+            return None
+        info = self._helpers.analyzeResponse(response)
+        body = self._helpers.bytesToString(
+            response[info.getBodyOffset():])
+        return (info.getStatusCode(), list(info.getHeaders()), body)
+
     def check(self, message):
         info = self._helpers.analyzeRequest(message)
         url = info.getUrl()
@@ -141,12 +148,13 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
             message.getHttpService(),
             self.rewrite(message.getRequest()))
 
-        original_len = len(message.getResponse())
-        lowpriv_len = len(replayed.getResponse())
-        result = compare.classify(original_len, lowpriv_len)
+        original = self.parts(message.getResponse())
+        lowpriv = self.parts(replayed.getResponse())
+        result = compare.classify(original, lowpriv)
         add_row(self._model,
                 [len(self._model.rows) + 1, info.getMethod(), str(url),
-                 result, original_len, lowpriv_len])
+                 result, original[0],
+                 lowpriv[0] if lowpriv else "-"])
 
     def processHttpMessage(self, toolFlag, messageIsRequest, message):
         if messageIsRequest or not self._passive_box.isSelected():

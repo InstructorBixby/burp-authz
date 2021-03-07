@@ -4,7 +4,8 @@ from java.lang import Runnable
 from javax.swing import SwingUtilities
 from javax.swing.table import AbstractTableModel
 
-COLUMNS = ["#", "method", "url", "result", "orig", "lowpriv"]
+COLUMNS = ["#", "method", "url", "result", "orig status",
+           "lowpriv status"]
 
 
 class ResultsModel(AbstractTableModel):

@@ -36,6 +36,7 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
         self._callbacks = callbacks
         self._helpers = callbacks.getHelpers()
         self._out = PrintWriter(callbacks.getStdout(), True)
+        self._err = PrintWriter(callbacks.getStderr(), True)
         self._seen = set()
 
         self._model = ResultsModel()
@@ -126,8 +127,6 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
         body = request[info.getBodyOffset():]
         return self._helpers.buildHttpMessage(new_headers, body)
 
-    # (status, headers, body) the way compare.classify wants it. the
-    # body has to go through bytesToString, it is a java byte[]
     def parts(self, response):
         if response is None:
             return None
@@ -144,12 +143,24 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
             return
         self._seen.add(k)
 
-        replayed = self._callbacks.makeHttpRequest(
-            message.getHttpService(),
-            self.rewrite(message.getRequest()))
-
         original = self.parts(message.getResponse())
-        lowpriv = self.parts(replayed.getResponse())
+        if original is None:
+            # nothing to compare against. happens with a request
+            # dragged in from a saved file rather than history
+            return
+
+        # a host that is down gives you a message object back with a
+        # null response, and null.length is the stack trace i kept
+        # seeing in the Output tab
+        try:
+            replayed = self._callbacks.makeHttpRequest(
+                message.getHttpService(),
+                self.rewrite(message.getRequest()))
+            lowpriv = self.parts(replayed.getResponse())
+        except Exception as e:
+            self._err.println("replay failed for %s: %s" % (url, e))
+            lowpriv = None
+
         result = compare.classify(original, lowpriv)
         add_row(self._model,
                 [len(self._model.rows) + 1, info.getMethod(), str(url),

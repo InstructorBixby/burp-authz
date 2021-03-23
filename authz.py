@@ -16,10 +16,10 @@ from javax.swing import (BorderFactory, BoxLayout, JButton, JCheckBox,
                          JTable, JTextArea)
 from java.awt import BorderLayout, Dimension
 
-from burp import (IBurpExtender, IContextMenuFactory, IHttpListener,
-                  ITab)
+from burp import (IBurpExtender, IContextMenuFactory,
+                  IExtensionStateListener, IHttpListener, ITab)
 
-from authzlib import VERSION, compare, headers as hdr
+from authzlib import VERSION, compare, headers as hdr, worker
 from authzlib.table import ResultsModel, add_row
 
 BORING = (".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg",
@@ -30,7 +30,7 @@ SETTING_PASSIVE = "authz.passive"
 
 
 class BurpExtender(IBurpExtender, IHttpListener, ITab,
-                   IContextMenuFactory):
+                   IContextMenuFactory, IExtensionStateListener):
 
     def registerExtenderCallbacks(self, callbacks):
         self._callbacks = callbacks
@@ -38,6 +38,7 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
         self._out = PrintWriter(callbacks.getStdout(), True)
         self._err = PrintWriter(callbacks.getStderr(), True)
         self._seen = set()
+        self._pool = worker.pool(4)
 
         self._model = ResultsModel()
         self._table = JTable(self._model)
@@ -51,8 +52,16 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
         callbacks.setExtensionName("authz " + VERSION)
         callbacks.registerHttpListener(self)
         callbacks.registerContextMenuFactory(self)
+        callbacks.registerExtensionStateListener(self)
         callbacks.addSuiteTab(self)
         self._out.println("authz " + VERSION + " loaded")
+
+    # IExtensionStateListener. without this the pool threads keep
+    # running after the extension is unloaded and burp has to be
+    # restarted to get rid of them
+    def extensionUnloaded(self):
+        worker.shutdown(self._pool)
+        self._out.println("authz unloaded")
 
     def build_ui(self):
         top = JPanel()
@@ -103,7 +112,12 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
 
     def from_menu(self, invocation):
         for message in invocation.getSelectedMessages():
-            self.check(message)
+            self.submit(message)
+
+    def submit(self, message):
+        self._pool.submit(worker.Task(
+            self.check, (message,),
+            lambda e: self._err.println("check failed: %s" % e)))
 
     def clear(self):
         self._seen = set()
@@ -145,13 +159,7 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
 
         original = self.parts(message.getResponse())
         if original is None:
-            # nothing to compare against. happens with a request
-            # dragged in from a saved file rather than history
             return
-
-        # a host that is down gives you a message object back with a
-        # null response, and null.length is the stack trace i kept
-        # seeing in the Output tab
         try:
             replayed = self._callbacks.makeHttpRequest(
                 message.getHttpService(),
@@ -174,4 +182,4 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
         url = info.getUrl()
         if not self._callbacks.isInScope(url) or self.boring(url):
             return
-        self.check(message)
+        self.submit(message)

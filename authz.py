@@ -3,6 +3,7 @@
 
 import os
 import sys
+import threading
 
 EXT_DIR = os.path.dirname(os.path.abspath(__file__))
 if EXT_DIR not in sys.path:
@@ -38,6 +39,9 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
         self._out = PrintWriter(callbacks.getStdout(), True)
         self._err = PrintWriter(callbacks.getStderr(), True)
         self._seen = set()
+        # four workers and the proxy thread all reach _seen. without
+        # this the same url gets replayed twice now and then
+        self._lock = threading.Lock()
         self._pool = worker.pool(4)
 
         self._model = ResultsModel()
@@ -56,9 +60,6 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
         callbacks.addSuiteTab(self)
         self._out.println("authz " + VERSION + " loaded")
 
-    # IExtensionStateListener. without this the pool threads keep
-    # running after the extension is unloaded and burp has to be
-    # restarted to get rid of them
     def extensionUnloaded(self):
         worker.shutdown(self._pool)
         self._out.println("authz unloaded")
@@ -119,8 +120,16 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
             self.check, (message,),
             lambda e: self._err.println("check failed: %s" % e)))
 
+    def first_time(self, key):
+        with self._lock:
+            if key in self._seen:
+                return False
+            self._seen.add(key)
+            return True
+
     def clear(self):
-        self._seen = set()
+        with self._lock:
+            self._seen = set()
         self._model.clear()
 
     def lowpriv_headers(self):
@@ -152,10 +161,8 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
     def check(self, message):
         info = self._helpers.analyzeRequest(message)
         url = info.getUrl()
-        k = "%s %s" % (info.getMethod(), str(url))
-        if k in self._seen:
+        if not self.first_time("%s %s" % (info.getMethod(), str(url))):
             return
-        self._seen.add(k)
 
         original = self.parts(message.getResponse())
         if original is None:

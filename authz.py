@@ -11,16 +11,12 @@ if EXT_DIR not in sys.path:
 
 from java.io import PrintWriter
 from java.util import ArrayList
-
-from javax.swing import (BorderFactory, BoxLayout, JButton, JCheckBox,
-                         JMenuItem, JPanel, JScrollPane, JSplitPane,
-                         JTable, JTextArea)
-from java.awt import BorderLayout, Dimension
+from javax.swing import JMenuItem
 
 from burp import (IBurpExtender, IContextMenuFactory,
                   IExtensionStateListener, IHttpListener, ITab)
 
-from authzlib import VERSION, compare, headers as hdr, worker
+from authzlib import VERSION, compare, headers as hdr, ui, worker
 from authzlib.table import ResultsModel, add_row
 
 BORING = (".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg",
@@ -39,18 +35,12 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
         self._out = PrintWriter(callbacks.getStdout(), True)
         self._err = PrintWriter(callbacks.getStderr(), True)
         self._seen = set()
-        # four workers and the proxy thread all reach _seen. without
-        # this the same url gets replayed twice now and then
         self._lock = threading.Lock()
+        self._pending = 0
         self._pool = worker.pool(4)
 
         self._model = ResultsModel()
-        self._table = JTable(self._model)
-        self._table.setAutoCreateRowSorter(True)
-        self._headers_box = JTextArea(4, 80)
-        self._passive_box = JCheckBox("replay everything in scope "
-                                      "as i browse")
-        self._panel = self.build_ui()
+        self._ui = ui.build(self._model, self.save, self.clear)
 
         self.load()
         callbacks.setExtensionName("authz " + VERSION)
@@ -64,45 +54,27 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
         worker.shutdown(self._pool)
         self._out.println("authz unloaded")
 
-    def build_ui(self):
-        top = JPanel()
-        top.setLayout(BoxLayout(top, BoxLayout.Y_AXIS))
-        top.setBorder(
-            BorderFactory.createTitledBorder("low privilege session"))
-        top.add(JScrollPane(self._headers_box))
-        top.add(self._passive_box)
-        top.add(JButton("save", actionPerformed=lambda e: self.save()))
-        top.add(JButton("clear results",
-                        actionPerformed=lambda e: self.clear()))
-
-        split = JSplitPane(JSplitPane.VERTICAL_SPLIT, top,
-                           JScrollPane(self._table))
-        split.setPreferredSize(Dimension(900, 600))
-        panel = JPanel(BorderLayout())
-        panel.add(split, BorderLayout.CENTER)
-        return panel
-
     def load(self):
         saved = self._callbacks.loadExtensionSetting(SETTING_HEADERS)
         if saved:
-            self._headers_box.setText(saved.replace("\\n", "\n"))
+            self._ui.headers_box.setText(saved.replace("\\n", "\n"))
         passive = self._callbacks.loadExtensionSetting(SETTING_PASSIVE)
-        self._passive_box.setSelected(passive == "true")
+        self._ui.passive_box.setSelected(passive == "true")
 
     def save(self):
         self._callbacks.saveExtensionSetting(
             SETTING_HEADERS,
-            self._headers_box.getText().replace("\n", "\\n"))
+            self._ui.headers_box.getText().replace("\n", "\\n"))
         self._callbacks.saveExtensionSetting(
             SETTING_PASSIVE,
-            "true" if self._passive_box.isSelected() else "false")
+            "true" if self._ui.passive_box.isSelected() else "false")
         self._out.println("settings saved")
 
     def getTabCaption(self):
         return "authz"
 
     def getUiComponent(self):
-        return self._panel
+        return self._ui.panel
 
     def createMenuItems(self, invocation):
         menu = ArrayList()
@@ -116,9 +88,17 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
             self.submit(message)
 
     def submit(self, message):
+        with self._lock:
+            self._pending += 1
+        self.show_status()
         self._pool.submit(worker.Task(
             self.check, (message,),
             lambda e: self._err.println("check failed: %s" % e)))
+
+    def show_status(self):
+        self._ui.status.setText("%d queued, %d results"
+                                % (self._pending,
+                                   len(self._model.rows)))
 
     def first_time(self, key):
         with self._lock:
@@ -131,9 +111,10 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
         with self._lock:
             self._seen = set()
         self._model.clear()
+        self.show_status()
 
     def lowpriv_headers(self):
-        lines = self._headers_box.getText().splitlines()
+        lines = self._ui.headers_box.getText().splitlines()
         return [l.strip() for l in lines if l.strip()]
 
     def boring(self, url):
@@ -159,6 +140,14 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
         return (info.getStatusCode(), list(info.getHeaders()), body)
 
     def check(self, message):
+        try:
+            self._check(message)
+        finally:
+            with self._lock:
+                self._pending -= 1
+            self.show_status()
+
+    def _check(self, message):
         info = self._helpers.analyzeRequest(message)
         url = info.getUrl()
         if not self.first_time("%s %s" % (info.getMethod(), str(url))):
@@ -183,7 +172,7 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
                  lowpriv[0] if lowpriv else "-"])
 
     def processHttpMessage(self, toolFlag, messageIsRequest, message):
-        if messageIsRequest or not self._passive_box.isSelected():
+        if messageIsRequest or not self._ui.passive_box.isSelected():
             return
         info = self._helpers.analyzeRequest(message)
         url = info.getUrl()

@@ -2,9 +2,10 @@
 three quarters of that file had become JPanel wiring."""
 
 from java.awt import BorderLayout, Dimension
+from java.lang import Runnable
 from javax.swing import (BorderFactory, BoxLayout, JButton, JCheckBox,
                          JLabel, JPanel, JScrollPane, JSplitPane,
-                         JTable, JTextArea)
+                         JTable, JTextArea, SwingUtilities)
 
 
 class Widgets(object):
@@ -17,6 +18,19 @@ class Widgets(object):
         self.status = JLabel("idle")
         self.table = None
         self.panel = None
+
+    def set_status(self, text):
+        SwingUtilities.invokeLater(_SetText(self.status, text))
+
+
+class _SetText(Runnable):
+
+    def __init__(self, component, text):
+        self.component = component
+        self.text = text
+
+    def run(self):
+        self.component.setText(self.text)
 
 
 def build(model, on_save, on_clear):

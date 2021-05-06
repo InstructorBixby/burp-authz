@@ -1,11 +1,23 @@
-"""Swing table model for the results tab."""
+"""Swing table model and renderer for the results tab."""
 
+from java.awt import Color
 from java.lang import Runnable
 from javax.swing import SwingUtilities
-from javax.swing.table import AbstractTableModel
+from javax.swing.table import (AbstractTableModel,
+                               DefaultTableCellRenderer)
 
 COLUMNS = ["#", "method", "url", "result", "orig status",
            "lowpriv status"]
+
+RESULT_COLUMN = 3
+
+# pale so the selection highlight still reads
+COLOURS = {
+    "same": Color(255, 214, 214),
+    "similar": Color(255, 240, 200),
+    "different": Color(222, 245, 222),
+    "error": Color(235, 235, 235),
+}
 
 
 class ResultsModel(AbstractTableModel):
@@ -33,6 +45,22 @@ class ResultsModel(AbstractTableModel):
     def clear(self):
         self.rows = []
         self.fireTableDataChanged()
+
+
+class ResultRenderer(DefaultTableCellRenderer):
+    """"same" means the low privilege session got the same answer,
+    which is the interesting case, so that is the one painted red."""
+
+    def getTableCellRendererComponent(self, table, value, selected,
+                                      focused, row, col):
+        c = DefaultTableCellRenderer.getTableCellRendererComponent(
+            self, table, value, selected, focused, row, col)
+        if not selected:
+            model_row = table.convertRowIndexToModel(row)
+            result = table.getModel().getValueAt(model_row,
+                                                 RESULT_COLUMN)
+            c.setBackground(COLOURS.get(result, Color.WHITE))
+        return c
 
 
 class _AddRow(Runnable):

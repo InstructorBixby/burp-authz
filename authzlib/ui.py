@@ -2,10 +2,12 @@
 three quarters of that file had become JPanel wiring."""
 
 from java.awt import BorderLayout, Dimension
-from java.lang import Runnable
+from java.lang import Runnable, String
 from javax.swing import (BorderFactory, BoxLayout, JButton, JCheckBox,
                          JLabel, JPanel, JScrollPane, JSplitPane,
                          JTable, JTextArea, SwingUtilities)
+
+from authzlib.table import ResultRenderer
 
 
 class Widgets(object):
@@ -37,6 +39,10 @@ def build(model, on_save, on_clear):
     w = Widgets()
     w.table = JTable(model)
     w.table.setAutoCreateRowSorter(True)
+    # setDefaultRenderer is keyed on the column class, and every
+    # column here reports String because the model returns strings
+    w.table.setDefaultRenderer(String, ResultRenderer())
+    w.table.getColumnModel().getColumn(2).setPreferredWidth(420)
 
     buttons = JPanel()
     buttons.add(JButton("save", actionPerformed=lambda e: on_save()))

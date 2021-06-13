@@ -27,3 +27,15 @@ def test_an_empty_path_is_not_static():
 
 def test_an_api_call_is_interesting():
     assert filters.interesting("GET", "/api/orders/4")
+
+
+def test_options_is_skipped():
+    assert not filters.interesting("OPTIONS", "/api/orders/4")
+
+
+def test_lowercase_options_is_skipped_too():
+    assert not filters.interesting("options", "/api/orders/4")
+
+
+def test_a_post_is_interesting():
+    assert filters.interesting("POST", "/api/orders")

@@ -16,11 +16,9 @@ from javax.swing import JMenuItem
 from burp import (IBurpExtender, IContextMenuFactory,
                   IExtensionStateListener, IHttpListener, ITab)
 
-from authzlib import VERSION, compare, headers as hdr, ui, worker
+from authzlib import (VERSION, compare, filters, headers as hdr, ui,
+                      worker)
 from authzlib.table import ResultsModel, add_row
-
-BORING = (".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg",
-          ".ico", ".woff", ".woff2", ".ttf", ".map")
 
 SETTING_HEADERS = "authz.lowpriv.headers"
 SETTING_PASSIVE = "authz.passive"
@@ -84,6 +82,7 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
         return menu
 
     def from_menu(self, invocation):
+        # from the menu i asked for it, so no filtering
         for message in invocation.getSelectedMessages():
             self.submit(message)
 
@@ -96,9 +95,8 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
             lambda e: self._err.println("check failed: %s" % e)))
 
     def show_status(self):
-        self._ui.status.setText("%d queued, %d results"
-                                % (self._pending,
-                                   len(self._model.rows)))
+        self._ui.set_status("%d queued, %d results"
+                            % (self._pending, len(self._model.rows)))
 
     def first_time(self, key):
         with self._lock:
@@ -116,13 +114,6 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
     def lowpriv_headers(self):
         lines = self._ui.headers_box.getText().splitlines()
         return [l.strip() for l in lines if l.strip()]
-
-    def boring(self, url):
-        path = url.getPath().lower()
-        for ext in BORING:
-            if path.endswith(ext):
-                return True
-        return False
 
     def rewrite(self, request):
         info = self._helpers.analyzeRequest(request)
@@ -176,6 +167,8 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
             return
         info = self._helpers.analyzeRequest(message)
         url = info.getUrl()
-        if not self._callbacks.isInScope(url) or self.boring(url):
+        if not self._callbacks.isInScope(url):
+            return
+        if not filters.interesting(info.getMethod(), url.getPath()):
             return
         self.submit(message)

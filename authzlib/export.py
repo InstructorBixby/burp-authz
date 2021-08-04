@@ -1,6 +1,6 @@
 """Write the results table out as csv. No burp imports."""
 
-from authzlib.table import COLUMNS
+from authzlib.columns import COLUMNS
 
 
 def _quote(value):

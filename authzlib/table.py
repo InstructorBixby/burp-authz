@@ -6,10 +6,7 @@ from javax.swing import SwingUtilities
 from javax.swing.table import (AbstractTableModel,
                                DefaultTableCellRenderer)
 
-COLUMNS = ["#", "method", "url", "result", "orig status",
-           "lowpriv status"]
-
-RESULT_COLUMN = 3
+from authzlib.columns import COLUMNS, RESULT_COLUMN
 
 # pale so the selection highlight still reads
 COLOURS = {

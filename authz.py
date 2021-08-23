@@ -16,8 +16,8 @@ from javax.swing import JMenuItem
 from burp import (IBurpExtender, IContextMenuFactory,
                   IExtensionStateListener, IHttpListener, ITab)
 
-from authzlib import (VERSION, compare, filters, headers as hdr, ui,
-                      worker)
+from authzlib import (VERSION, compare, export, filters,
+                      headers as hdr, ui, worker)
 from authzlib.table import ResultsModel, add_row
 
 SETTING_HEADERS = "authz.lowpriv.headers"
@@ -38,7 +38,8 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
         self._pool = worker.pool(4)
 
         self._model = ResultsModel()
-        self._ui = ui.build(self._model, self.save, self.clear)
+        self._ui = ui.build(self._model, self.save, self.clear,
+                            self.export)
 
         self.load()
         callbacks.setExtensionName("authz " + VERSION)
@@ -68,6 +69,22 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
             "true" if self._ui.passive_box.isSelected() else "false")
         self._out.println("settings saved")
 
+    def export(self):
+        if not self._model.rows:
+            ui.warn(self._ui.panel, "nothing to export yet")
+            return
+        path = ui.ask_for_file(self._ui.panel)
+        if path is None:
+            return
+        try:
+            export.write(path, self._model.rows)
+        except Exception as e:
+            self._err.println("export failed: %s" % e)
+            ui.warn(self._ui.panel, "could not write %s" % path)
+            return
+        self._out.println("exported %d rows to %s"
+                          % (len(self._model.rows), path))
+
     def getTabCaption(self):
         return "authz"
 
@@ -82,7 +99,6 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
         return menu
 
     def from_menu(self, invocation):
-        # from the menu i asked for it, so no filtering
         for message in invocation.getSelectedMessages():
             self.submit(message)
 

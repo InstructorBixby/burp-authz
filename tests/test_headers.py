@@ -4,6 +4,7 @@ REQUEST = [
     "GET /admin/users HTTP/1.1",
     "Host: target.example",
     "Cookie: session=admin-session",
+    "Authorization: Bearer admin-token",
     "Accept: application/json",
 ]
 
@@ -31,3 +32,23 @@ def test_replace_drops_the_old_header():
 
 def test_replace_handles_an_empty_list():
     assert hdr.replace([], ["Cookie: x"]) == ["Cookie: x"]
+
+
+def test_strip_session_removes_cookie_and_bearer():
+    out = hdr.strip_session(REQUEST)
+    assert not [h for h in out if h.lower().startswith("cookie")]
+    assert not [h for h in out if h.lower().startswith("authorization")]
+
+
+def test_strip_session_keeps_host_and_accept():
+    out = hdr.strip_session(REQUEST)
+    assert "Host: target.example" in out
+    assert "Accept: application/json" in out
+
+
+def test_strip_session_keeps_the_request_line():
+    assert hdr.strip_session(REQUEST)[0] == "GET /admin/users HTTP/1.1"
+
+
+def test_strip_session_on_nothing():
+    assert hdr.strip_session([]) == []

@@ -6,7 +6,7 @@ javax.swing into export.py, so test_export.py could not be collected
 outside burp.
 """
 
-COLUMNS = ["#", "method", "url", "result", "orig status",
-           "lowpriv status"]
+COLUMNS = ["#", "method", "url", "status", "as lowpriv", "as nobody"]
 
-RESULT_COLUMN = 3
+# the two columns holding a result, for the renderer
+RESULT_COLUMNS = (4, 5)

@@ -6,13 +6,14 @@ from javax.swing import SwingUtilities
 from javax.swing.table import (AbstractTableModel,
                                DefaultTableCellRenderer)
 
-from authzlib.columns import COLUMNS, RESULT_COLUMN
+from authzlib.columns import COLUMNS, RESULT_COLUMNS
 
 # pale so the selection highlight still reads
 COLOURS = {
     "same": Color(255, 214, 214),
     "similar": Color(255, 240, 200),
     "different": Color(222, 245, 222),
+    "blocked": Color(222, 245, 222),
     "error": Color(235, 235, 235),
 }
 
@@ -45,18 +46,17 @@ class ResultsModel(AbstractTableModel):
 
 
 class ResultRenderer(DefaultTableCellRenderer):
-    """"same" means the low privilege session got the same answer,
-    which is the interesting case, so that is the one painted red."""
+    """"same" means the other session got the same answer, which is
+    the interesting case, so that is the one painted red."""
 
     def getTableCellRendererComponent(self, table, value, selected,
                                       focused, row, col):
         c = DefaultTableCellRenderer.getTableCellRendererComponent(
             self, table, value, selected, focused, row, col)
-        if not selected:
-            model_row = table.convertRowIndexToModel(row)
-            result = table.getModel().getValueAt(model_row,
-                                                 RESULT_COLUMN)
-            c.setBackground(COLOURS.get(result, Color.WHITE))
+        if not selected and col in RESULT_COLUMNS:
+            c.setBackground(COLOURS.get(value, Color.WHITE))
+        elif not selected:
+            c.setBackground(Color.WHITE)
         return c
 
 

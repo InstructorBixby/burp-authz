@@ -131,12 +131,18 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
         lines = self._ui.headers_box.getText().splitlines()
         return [l.strip() for l in lines if l.strip()]
 
-    def rewrite(self, request):
+    def as_lowpriv(self, request):
         info = self._helpers.analyzeRequest(request)
         new_headers = hdr.replace(list(info.getHeaders()),
                                   self.lowpriv_headers())
-        body = request[info.getBodyOffset():]
-        return self._helpers.buildHttpMessage(new_headers, body)
+        return self._helpers.buildHttpMessage(
+            new_headers, request[info.getBodyOffset():])
+
+    def as_nobody(self, request):
+        info = self._helpers.analyzeRequest(request)
+        new_headers = hdr.strip_session(list(info.getHeaders()))
+        return self._helpers.buildHttpMessage(
+            new_headers, request[info.getBodyOffset():])
 
     def parts(self, response):
         if response is None:
@@ -145,6 +151,14 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
         body = self._helpers.bytesToString(
             response[info.getBodyOffset():])
         return (info.getStatusCode(), list(info.getHeaders()), body)
+
+    def replay(self, service, request, url):
+        try:
+            message = self._callbacks.makeHttpRequest(service, request)
+            return self.parts(message.getResponse())
+        except Exception as e:
+            self._err.println("replay failed for %s: %s" % (url, e))
+            return None
 
     def check(self, message):
         try:
@@ -163,20 +177,17 @@ class BurpExtender(IBurpExtender, IHttpListener, ITab,
         original = self.parts(message.getResponse())
         if original is None:
             return
-        try:
-            replayed = self._callbacks.makeHttpRequest(
-                message.getHttpService(),
-                self.rewrite(message.getRequest()))
-            lowpriv = self.parts(replayed.getResponse())
-        except Exception as e:
-            self._err.println("replay failed for %s: %s" % (url, e))
-            lowpriv = None
 
-        result = compare.classify(original, lowpriv)
+        service = message.getHttpService()
+        request = message.getRequest()
+        lowpriv = self.replay(service, self.as_lowpriv(request), url)
+        nobody = self.replay(service, self.as_nobody(request), url)
+
         add_row(self._model,
                 [len(self._model.rows) + 1, info.getMethod(), str(url),
-                 result, original[0],
-                 lowpriv[0] if lowpriv else "-"])
+                 original[0],
+                 compare.classify(original, lowpriv),
+                 compare.classify(original, nobody)])
 
     def processHttpMessage(self, toolFlag, messageIsRequest, message):
         if messageIsRequest or not self._ui.passive_box.isSelected():

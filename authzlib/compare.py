@@ -7,6 +7,7 @@ import re
 SAME = "same"
 SIMILAR = "similar"
 DIFFERENT = "different"
+BLOCKED = "blocked"
 ERROR = "error"
 
 SIMILAR_RATIO = 0.95
@@ -22,6 +23,17 @@ NOISE = [
                r'[0-9a-f]{4}-[0-9a-f]{12}', re.I),
     re.compile(r'\bnonce=["\'][^"\']+["\']', re.I),
 ]
+
+# plenty of apps answer an unauthorized request with 200 and the login
+# form, so status alone is not enough to spot a rejection
+LOGIN_MARKERS = [
+    re.compile(r'<input[^>]+type=["\']password["\']', re.I),
+    re.compile(r'name=["\'](password|passwd|j_password)["\']', re.I),
+    re.compile(r'\b(sign in|log ?in) to continue\b', re.I),
+]
+
+LOGIN_PATHS = ("/login", "/signin", "/sign_in", "/auth/login",
+               "/account/login", "/sessions/new")
 
 
 def scrub(body):
@@ -48,26 +60,57 @@ def header(headers, name):
     return None
 
 
+def looks_like_login(body):
+    if not body:
+        return False
+    for pattern in LOGIN_MARKERS:
+        if pattern.search(body):
+            return True
+    return False
+
+
+def is_login_redirect(location):
+    if not location:
+        return False
+    path = location.split("?")[0].rstrip("/").lower()
+    for known in LOGIN_PATHS:
+        if path.endswith(known):
+            return True
+    return False
+
+
 def classify(original, replay, limit=8192):
     """Compare two responses.
 
     `original` and `replay` are (status, headers, body) tuples, with
     replay allowed to be None when the request failed outright.
 
-    A 302 to /login has the same length as a 302 to /dashboard, which
-    is how the length-only version called every redirect "same".
+    same      the other session got the same answer. look at this one
+    similar   close enough that it is probably the same page
+    blocked   the server sent them to a login page instead
+    different something else came back
+    error     no response at all
     """
     if replay is None:
         return ERROR
     o_status, o_headers, o_body = original
     r_status, r_headers, r_body = replay
 
+    if 300 <= r_status < 400:
+        r_loc = header(r_headers, "location")
+        if is_login_redirect(r_loc):
+            return BLOCKED
+        if o_status == r_status:
+            return (SAME if header(o_headers, "location") == r_loc
+                    else DIFFERENT)
+        return DIFFERENT
+
+    if looks_like_login(r_body) and not looks_like_login(o_body):
+        return BLOCKED
+    if r_status in (401, 403):
+        return BLOCKED
     if o_status != r_status:
         return DIFFERENT
-    if 300 <= r_status < 400:
-        o_loc = header(o_headers, "location")
-        r_loc = header(r_headers, "location")
-        return SAME if o_loc == r_loc else DIFFERENT
 
     a = scrub(o_body)
     b = scrub(r_body)

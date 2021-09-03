@@ -7,6 +7,10 @@ PAGE = (
     "</body></html>"
 )
 
+LOGIN = ('<html><body><form action="/login" method="post">'
+         '<input name="email"><input type="password" name="password">'
+         '</form></body></html>')
+
 
 def resp(status, body="", location=None):
     headers = ["HTTP/1.1 %d" % status, "Content-Type: text/html"]
@@ -25,9 +29,14 @@ def test_unrelated_bodies_are_different():
                             resp(200, "nope")) == compare.DIFFERENT
 
 
-def test_a_403_is_different_from_a_200():
+def test_a_403_is_blocked():
     assert compare.classify(resp(200, "<p>hi</p>"),
-                            resp(403, "Forbidden")) == compare.DIFFERENT
+                            resp(403, "Forbidden")) == compare.BLOCKED
+
+
+def test_a_401_is_blocked():
+    assert compare.classify(resp(200, "<p>hi</p>"),
+                            resp(401, "")) == compare.BLOCKED
 
 
 def test_no_response_is_error():
@@ -41,16 +50,25 @@ def test_csrf_token_is_not_a_difference():
     assert compare.classify(a, b) == compare.SAME
 
 
+def test_a_200_login_page_is_blocked():
+    assert compare.classify(resp(200, PAGE % ("a", "b")),
+                            resp(200, LOGIN)) == compare.BLOCKED
+
+
+def test_a_login_page_on_both_sides_is_not_blocked():
+    assert compare.classify(resp(200, LOGIN),
+                            resp(200, LOGIN)) == compare.SAME
+
+
+def test_redirect_to_login_is_blocked():
+    assert compare.classify(resp(302, "", "/dashboard"),
+                            resp(302, "", "/login?next=/x")
+                            ) == compare.BLOCKED
+
+
 def test_redirect_to_the_same_place_is_same():
-    a = resp(302, "", "/dashboard")
-    b = resp(302, "", "/dashboard")
-    assert compare.classify(a, b) == compare.SAME
-
-
-def test_redirect_to_login_is_not_the_same_as_redirect_to_dashboard():
-    a = resp(302, "", "/dashboard")
-    b = resp(302, "", "/login?next=/dashboard")
-    assert compare.classify(a, b) == compare.DIFFERENT
+    assert compare.classify(resp(302, "", "/dashboard"),
+                            resp(302, "", "/dashboard")) == compare.SAME
 
 
 def test_header_lookup_is_case_insensitive():

@@ -10,7 +10,9 @@ DIFFERENT = "different"
 BLOCKED = "blocked"
 ERROR = "error"
 
-SIMILAR_RATIO = 0.95
+# above this, two responses are the same page with different noise in
+# it. 0.95 came from looking at about thirty pairs by hand
+SAME_ENOUGH = 0.95
 
 NOISE = [
     re.compile(r'name=["\']_?csrf[^"\']*["\']\s+value=["\'][^"\']+["\']',
@@ -24,8 +26,6 @@ NOISE = [
     re.compile(r'\bnonce=["\'][^"\']+["\']', re.I),
 ]
 
-# plenty of apps answer an unauthorized request with 200 and the login
-# form, so status alone is not enough to spot a rejection
 LOGIN_MARKERS = [
     re.compile(r'<input[^>]+type=["\']password["\']', re.I),
     re.compile(r'name=["\'](password|passwd|j_password)["\']', re.I),
@@ -116,6 +116,6 @@ def classify(original, replay, limit=8192):
     b = scrub(r_body)
     if a == b:
         return SAME
-    if similarity(a[:limit], b[:limit]) >= SIMILAR_RATIO:
+    if similarity(a[:limit], b[:limit]) >= SAME_ENOUGH:
         return SIMILAR
     return DIFFERENT

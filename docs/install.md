@@ -2,7 +2,7 @@
 
 ## jython
 
-Burp needs a standalone Jython jar to run Python extenions. 2.7.2 is
+Burp needs a standalone Jython jar to run Python extensions. 2.7.2 is
 the one I use.
 
 1. download `jython-standalone-2.7.2.jar`
@@ -10,7 +10,7 @@ the one I use.
    "Location of Jython standalone JAR file" at it
 3. in the same panel, set the folder for loading modules to the
    directory holding `authz.py`. Burp puts that folder on `sys.path`,
-   which is a second belt to to the `sys.path.insert` at the top of
+   which is a second belt to the `sys.path.insert` at the top of
    `authz.py`
 
 ## the extension
